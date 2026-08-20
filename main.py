@@ -45,7 +45,7 @@ def main():
         result = landmarker.detect_for_video(mp_image, frame_count)
 
         if result.hand_landmarks:
-            fingertip_indices = [4, 8, 12, 16, 20]
+            fingertip_indices = [4, 8, 12]
             hand_tip_points = []
 
             for hand_landmarks in result.hand_landmarks:
@@ -61,43 +61,47 @@ def main():
                 
 
             if len(hand_tip_points) >= 2:
-                effects = ["bgr", "hls", "negative", "hsv", "gray"]
+                effects = ["comic_dots", "green_ascii"]
                 for finger_index in range(len(fingertip_indices) - 2, -1, -1):
                     p1 = hand_tip_points[0][finger_index]
                     p2 = hand_tip_points[1][finger_index]
-                    p3 = hand_tip_points[0][0]
-                    p4 = hand_tip_points[1][0]
+                    p3 = hand_tip_points[0][finger_index + 1]
+                    p4 = hand_tip_points[1][finger_index + 1]
                     polygon = np.array([[p1, p3, p4, p2]], dtype=np.int32)
                     mask = np.zeros(img.shape[:2], dtype=np.uint8)
                     cv2.fillPoly(mask, polygon, 255)
 
                     effect = effects[finger_index % len(effects)]
-                    if effect == "bgr":
-                        # Warm color-shift filter.
-                        transformed = img.astype(np.float32)
-                        transformed[:, :, 0] *= 0.65
-                        transformed[:, :, 2] = np.minimum(transformed[:, :, 2] * 1.25, 255)
-                        transformed = transformed.astype(np.uint8)
-                    elif effect == "hls":
-                        # Neon filter with boosted saturation and lightness.
-                        hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
-                        hls[:, :, 0] = (hls[:, :, 0] + 45) % 180
-                        hls[:, :, 1] = np.clip(hls[:, :, 1] * 1.15, 0, 255).astype(np.uint8)
-                        hls[:, :, 2] = np.clip(hls[:, :, 2] * 1.8, 0, 255).astype(np.uint8)
-                        transformed = cv2.cvtColor(hls, cv2.COLOR_HLS2BGR)
-                    elif effect == "negative":
-                        # Posterized negative filter.
-                        transformed = cv2.bitwise_not(img)
-                        transformed = (transformed // 64) * 64
-                    elif effect == "hsv":
-                        # Thermal-style color filter.
+                    if effect == "comic_dots":
+                        # Comic-book halftone dots with bold color edges.
                         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                        transformed = cv2.applyColorMap(gray, cv2.COLORMAP_TURBO)
+                        posterized = (img // 64) * 64
+                        edges = cv2.Canny(gray, 80, 160)
+                        transformed = posterized.copy()
+                        transformed[edges > 0] = (0, 0, 0)
+                        spacing = 8
+                        for y in range(spacing // 2, img.shape[0], spacing):
+                            for x in range(spacing // 2, img.shape[1], spacing):
+                                radius = max(1, int((255 - int(gray[y, x])) / 100))
+                                cv2.circle(transformed, (x, y), radius, (40, 40, 40), -1)
                     else:
-                        # Pencil-sketch filter with edge emphasis.
+                        # Green terminal-style ASCII shading.
                         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                        edges = cv2.Canny(gray, 60, 140)
-                        transformed = cv2.cvtColor(255 - edges, cv2.COLOR_GRAY2BGR)
+                        chars = " .:-=+*#%@"
+                        cell_w, cell_h = 8, 12
+                        small = cv2.resize(
+                            gray,
+                            (max(1, img.shape[1] // cell_w), max(1, img.shape[0] // cell_h)),
+                        )
+                        transformed = np.zeros_like(img)
+                        for row in range(small.shape[0]):
+                            for col in range(small.shape[1]):
+                                char = chars[int(small[row, col]) * len(chars) // 256]
+                                cv2.putText(
+                                    transformed, char,
+                                    (col * cell_w, (row + 1) * cell_h),
+                                    cv2.FONT_HERSHEY_PLAIN, 0.8, (0, 220, 0), 1,
+                                )
 
                     img[mask == 255] = transformed[mask == 255]
                     cv2.polylines(img, [polygon], True,  2)
